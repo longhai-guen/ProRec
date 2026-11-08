@@ -21,6 +21,9 @@ class BaseModel(nn.Module):
         else:
             self.hyper_config = configs['model']
 
+        # test-time scorer ('model' | 'cf' | 'llm'); set by the trainer for the final test only
+        self.score_mode = 'model'
+
         # initialize parameters
     
     # suggest to return embeddings

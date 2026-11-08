@@ -10,6 +10,9 @@ class Logger(object):
     def __init__(self, log_configs=True):
         model_name = configs['model']['name']
         log_dir_path = './save/log/{}'.format(model_name)
+        profile = configs['model'].get('profile', 'real')
+        if profile != 'real':
+            log_dir_path += '_profile-{}'.format(profile)
 
         if not os.path.exists(log_dir_path):
             os.makedirs(log_dir_path)
@@ -17,7 +20,7 @@ class Logger(object):
         self.logger.setLevel(logging.INFO)
         dataset_name = configs['data']['name']
         if not configs['tune']['enable']:
-            log_file = logging.FileHandler('{}/{}_{}.log'.format(log_dir_path, dataset_name, get_local_time()), 'a', encoding='utf-8')
+            log_file = logging.FileHandler('{}/{}_seed{}_{}.log'.format(log_dir_path, dataset_name, configs['train']['seed'], get_local_time()), 'a', encoding='utf-8')
         else:
             log_file = logging.FileHandler('{}/{}-tune_{}.log'.format(log_dir_path, dataset_name, get_local_time()), 'a', encoding='utf-8')
         formatter = logging.Formatter('%(asctime)s - %(message)s')

@@ -35,8 +35,13 @@ class LightGCN_promax(BaseModel):
         if configs['data']['name'] == 'steam':
             self.temperature = 0.5
 
-        self.usrprf_embeds = t.tensor(self.pca(configs['usrprf_embeds'])).float().cuda()
-        self.itmprf_embeds = t.tensor(self.pca(configs['itmprf_embeds'])).float().cuda()  # [item_num, 1536]
+        # profile toggle: 'none' makes the model a pure LightGCN
+        self.profile_mode = configs['model']['profile']
+        if self.profile_mode == 'none':
+            return
+
+        self.usrprf_embeds = t.tensor(self.pca(configs['usrprf_embeds'])).float().to(configs['device'])
+        self.itmprf_embeds = t.tensor(self.pca(configs['itmprf_embeds'])).float().to(configs['device'])  # [item_num, 1536]
 
         with open("../data/{}/new_trn_rag_mat.pkl".format(configs['data']['name']), 'rb') as fs:
             mat = (pickle.load(fs) != 0).astype(np.float32)
@@ -109,11 +114,19 @@ class LightGCN_promax(BaseModel):
     def cal_loss(self, batch_data):
         self.is_training = True
         user_embeds, item_embeds = self.forward(self.adj, self.keep_rate)
-        user_embeds_2, item_embeds_2 = self.forward(self.new_adj, self.keep_rate)
         ancs, poss, negs = batch_data
         anc_embeds = user_embeds[ancs]
         pos_embeds = item_embeds[poss]
         neg_embeds = item_embeds[negs]
+
+        if self.profile_mode == 'none':
+            bpr_loss = cal_bpr_loss(anc_embeds, pos_embeds, neg_embeds) / anc_embeds.shape[0]
+            reg_loss = self.reg_weight * reg_params(self)
+            loss = bpr_loss + reg_loss
+            losses = {'bpr_loss': bpr_loss, 'reg_loss': reg_loss}
+            return loss, losses
+
+        user_embeds_2, item_embeds_2 = self.forward(self.new_adj, self.keep_rate)
 
         uni_ancs = t.unique(ancs)
         uni_poss = t.unique(poss)
@@ -162,6 +175,13 @@ class LightGCN_promax(BaseModel):
 
         pck_user_embeds = user_embeds[pck_users]
 
-        full_preds = pck_user_embeds @ item_embeds.T
+        if self.score_mode == 'llm':
+            # profile-only scorer: cosine similarity of the fixed PCA-whitened profiles (the SDR target)
+            usrprf = torch.nn.functional.normalize(self.usrprf_embeds[pck_users], dim=1)
+            itmprf = torch.nn.functional.normalize(self.itmprf_embeds, dim=1)
+            full_preds = usrprf @ itmprf.T
+        else:
+            # 'model' and 'cf' coincide: ProMax uses profiles only during training
+            full_preds = pck_user_embeds @ item_embeds.T
         full_preds = self._mask_predict(full_preds, train_mask)
         return full_preds

@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import random
 import numpy as np
@@ -140,17 +141,26 @@ class Trainer(object):
         model.load_state_dict(best_state_dict)
         self.evaluate(model)
 
-        # final test
+        # final test, once per requested scorer (validation/early stopping always uses 'model')
         self.logger.log("Test--------------------------------------------------------------------------")
         model = build_model(self.data_handler).to(configs['device'])
         model.load_state_dict(best_state_dict)
-        test_result = self.test(model)
+        profile = configs['model'].get('profile', 'real')
+        for score in configs['test'].get('scores', ['model']):
+            model.score_mode = score
+            test_result = self.test(model)
+            tag = 'profile={} score={} seed={}'.format(profile, score, configs['train']['seed'])
 
-        # save result
-        self.logger.log("Best Epoch {}. Final test result: {}.".format(best_epoch, test_result))
-        test_file = './save/result/' + configs['model']['name'] + '_' + configs['data']['name'] + '.txt'
-        with open(test_file, 'a') as f:
-            f.write("Best Epoch {}. Final test result: {}. \n".format(best_epoch, test_result))
+            # save result
+            self.logger.log("[{}] Best Epoch {}. Final test result: {}.".format(tag, best_epoch, test_result))
+            test_file = './save/result/' + configs['model']['name'] + '_' + configs['data']['name'] + '.txt'
+            with open(test_file, 'a') as f:
+                f.write("[{}] Best Epoch {}. Final test result: {}. \n".format(tag, best_epoch, test_result))
+            record = {'model': configs['model']['name'], 'dataset': configs['data']['name'], 'profile': profile,
+                      'score': score, 'seed': configs['train']['seed'], 'best_epoch': best_epoch,
+                      'k': configs['test']['k'], **{m: test_result[m].tolist() for m in test_result}}
+            with open('./save/result/ablation.jsonl', 'a') as f:
+                f.write(json.dumps(record) + '\n')
 
     @log_exceptions
     def evaluate(self, model, epoch_idx=None):

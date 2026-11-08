@@ -4,7 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 import pickle
 import numpy as np
-from config.configurator import configs
+from config.configurator import configs, perturb_profile
 from models.loss_utils import cal_bpr_loss, reg_params, cal_infonce_loss
 from models.base_model import BaseModel
 from models.model_utils import SpAdjEdgeDrop
@@ -34,19 +34,28 @@ class LightGCN_proex(BaseModel):
 
         self.alpha = torch.Tensor([self.hyper_config['alpha']] * self.num_profiles)
 
+        # profile toggle: 'none' makes the model a pure LightGCN
+        self.profile_mode = configs['model']['profile']
+        if self.profile_mode == 'none':
+            return
+
+        device = configs['device']
+        seed = configs['train']['seed']
         self.usrprf_embeds = []
         self.itmprf_embeds = []
 
-        self.usrprf_embeds.append(t.tensor(configs['usrprf_embeds']).float().cuda())
-        self.itmprf_embeds.append(t.tensor(configs['itmprf_embeds']).float().cuda())  # [item_num, 1536]
+        self.usrprf_embeds.append(t.tensor(configs['usrprf_embeds']).float().to(device))
+        self.itmprf_embeds.append(t.tensor(configs['itmprf_embeds']).float().to(device))  # [item_num, 1536]
 
         for i in range(self.num_profiles - 1):
             usrprf_embeds_path = "../data/{}/usr_emb_np_{}.pkl".format(configs['data']['name'], i + 1)
             itmprf_embeds_path = "../data/{}/itm_emb_np_{}.pkl".format(configs['data']['name'], i + 1)
             with open(usrprf_embeds_path, 'rb') as f:
-                self.usrprf_embeds.append(t.tensor(pickle.load(f)).float().cuda())
+                usrprf = perturb_profile(pickle.load(f), self.profile_mode, seed, 'user', i + 1)
+                self.usrprf_embeds.append(t.tensor(usrprf).float().to(device))
             with open(itmprf_embeds_path, 'rb') as f:
-                self.itmprf_embeds.append(t.tensor(pickle.load(f)).float().cuda())
+                itmprf = perturb_profile(pickle.load(f), self.profile_mode, seed, 'item', i + 1)
+                self.itmprf_embeds.append(t.tensor(itmprf).float().to(device))
 
         self.mlp = nn.Sequential(
             nn.Linear(self.usrprf_embeds[0].shape[1], (self.usrprf_embeds[0].shape[1] + self.embedding_size) // 2),
@@ -103,6 +112,13 @@ class LightGCN_proex(BaseModel):
         pos_embeds = item_embeds[poss]
         neg_embeds = item_embeds[negs]
 
+        if self.profile_mode == 'none':
+            bpr_loss = cal_bpr_loss(anc_embeds, pos_embeds, neg_embeds) / anc_embeds.shape[0]
+            reg_loss = self.reg_weight * reg_params(self)
+            loss = bpr_loss + reg_loss
+            losses = {'bpr_loss': bpr_loss, 'reg_loss': reg_loss}
+            return loss, losses
+
         env_losses = []
         usr_prf_list = []
         pos_prf_list = []
@@ -133,7 +149,7 @@ class LightGCN_proex(BaseModel):
         negprf_embeddings = t.stack(neg_prf_list)
 
         for env in range(self.num_envs):
-            beta = t.distributions.Dirichlet(self.alpha).sample().cuda()
+            beta = t.distributions.Dirichlet(self.alpha).sample().to(configs['device'])
 
             ancprf_embeds = t.einsum('i,ibd->bd', beta, ancprf_embeddings)
             posprf_embeds = t.einsum('i,ibd->bd', beta, posprf_embeddings)
@@ -169,6 +185,11 @@ class LightGCN_proex(BaseModel):
 
         pck_user_embeds = user_embeds[pck_users]
 
+        if self.profile_mode == 'none' or self.score_mode == 'cf':
+            full_preds = pck_user_embeds @ item_embeds.T
+            full_preds = self._mask_predict(full_preds, train_mask)
+            return full_preds
+
         usr_prf_list = []
         itm_prf_list = []
 
@@ -186,9 +207,15 @@ class LightGCN_proex(BaseModel):
         posprf_embeddings = t.stack(itm_prf_list, dim=1)
 
         # mean pooling for test
-        user_emb = pck_user_embeds + t.mean(ancprf_embeddings, dim=1)
-        item_emb = item_embeds + t.mean(posprf_embeddings, dim=1)
+        usrprf_mean = t.mean(ancprf_embeddings, dim=1)
+        itmprf_mean = t.mean(posprf_embeddings, dim=1)
 
-        full_preds = user_emb @ item_emb.T
+        if self.score_mode == 'llm':
+            # profile-only scorer: the learned profile projection, no CF embeddings
+            full_preds = usrprf_mean @ itmprf_mean.T
+        else:
+            user_emb = pck_user_embeds + usrprf_mean
+            item_emb = item_embeds + itmprf_mean
+            full_preds = user_emb @ item_emb.T
         full_preds = self._mask_predict(full_preds, train_mask)
         return full_preds
