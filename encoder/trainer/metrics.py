@@ -164,6 +164,22 @@ class Metric(object):
 
         return result, candidate_set
 
+    def topk_lists(self, model, test_dataloader, topk):
+        """Tier 2: per-user top-K item lists (training items masked), aligned with the returned user ids."""
+        users, lists = [], []
+        for _, tem in enumerate(test_dataloader):
+            if not isinstance(tem, list):
+                tem = [tem]
+            test_user = tem[0].numpy().tolist()
+            batch_data = list(map(lambda x: x.long().to(configs['device']), tem))
+            with torch.no_grad():
+                batch_pred = model.full_predict(batch_data)
+            batch_pred = self._mask_history_pos(batch_pred, test_user, test_dataloader)
+            _, batch_rate = torch.topk(batch_pred, k=topk)
+            users.append(np.asarray(test_user, dtype=np.int32))
+            lists.append(batch_rate.cpu().numpy().astype(np.int32))
+        return np.concatenate(users), np.concatenate(lists)
+
     def _mask_history_pos(self, batch_rate, test_user, test_dataloader):
         if not hasattr(test_dataloader.dataset, 'user_history_lists'):
             return batch_rate

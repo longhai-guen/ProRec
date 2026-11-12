@@ -167,6 +167,17 @@ class LightGCN_promax(BaseModel):
                   's2dr_loss:': s2dr_loss}
         return loss, losses
 
+    def export_embeds(self):
+        """Tier 2: final CF embeddings and the PCA-whitened profile embeddings (as used by score 'llm')."""
+        self.is_training = False
+        with t.no_grad():
+            user_embeds, item_embeds = self.forward(self.adj, 1.0)
+            out = {'cf_user': user_embeds, 'cf_item': item_embeds}
+            if self.profile_mode != 'none':
+                out['llm_user'] = self.usrprf_embeds
+                out['llm_item'] = self.itmprf_embeds
+        return {k: v.float().cpu().numpy() for k, v in out.items()}
+
     def full_predict(self, batch_data):
         user_embeds, item_embeds = self.forward(self.adj, 1.0)
         self.is_training = False

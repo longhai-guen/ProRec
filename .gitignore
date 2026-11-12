@@ -1,0 +1,32 @@
+# Experiment results
+encoder/save/result/
+**/save/result/
+
+# Credentials and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*.json
+service_account*.json
+*secret*
+*.token
+.netrc
+.huggingface/
+.cache/huggingface/
+wandb/
+.wandb/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]

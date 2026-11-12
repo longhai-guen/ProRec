@@ -1,7 +1,7 @@
 import os
 import logging
 import datetime
-from config.configurator import configs
+from config.configurator import configs, profile_tag
 
 def get_local_time():
     return datetime.datetime.now().strftime('%b-%d-%Y_%H-%M-%S')
@@ -10,7 +10,7 @@ class Logger(object):
     def __init__(self, log_configs=True):
         model_name = configs['model']['name']
         log_dir_path = './save/log/{}'.format(model_name)
-        profile = configs['model'].get('profile', 'real')
+        profile = profile_tag(configs['model'])
         if profile != 'real':
             log_dir_path += '_profile-{}'.format(profile)
 

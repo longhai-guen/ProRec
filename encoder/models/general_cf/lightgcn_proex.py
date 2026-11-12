@@ -41,6 +41,7 @@ class LightGCN_proex(BaseModel):
 
         device = configs['device']
         seed = configs['train']['seed']
+        self.profile_modes = configs['model']['profile_modes']
         self.usrprf_embeds = []
         self.itmprf_embeds = []
 
@@ -51,10 +52,10 @@ class LightGCN_proex(BaseModel):
             usrprf_embeds_path = "../data/{}/usr_emb_np_{}.pkl".format(configs['data']['name'], i + 1)
             itmprf_embeds_path = "../data/{}/itm_emb_np_{}.pkl".format(configs['data']['name'], i + 1)
             with open(usrprf_embeds_path, 'rb') as f:
-                usrprf = perturb_profile(pickle.load(f), self.profile_mode, seed, 'user', i + 1)
+                usrprf = perturb_profile(pickle.load(f), self.profile_modes['user'], seed, 'user', i + 1)
                 self.usrprf_embeds.append(t.tensor(usrprf).float().to(device))
             with open(itmprf_embeds_path, 'rb') as f:
-                itmprf = perturb_profile(pickle.load(f), self.profile_mode, seed, 'item', i + 1)
+                itmprf = perturb_profile(pickle.load(f), self.profile_modes['item'], seed, 'item', i + 1)
                 self.itmprf_embeds.append(t.tensor(itmprf).float().to(device))
 
         self.mlp = nn.Sequential(
@@ -175,6 +176,17 @@ class LightGCN_proex(BaseModel):
 
         losses = {'bpr_loss': main_loss, 'reg_loss': reg_loss, 'inv_loss': invariant_loss, 'uniform_loss:': uniform_loss}
         return loss, losses
+
+    def export_embeds(self):
+        """Tier 2: final CF embeddings and the projected, mean-pooled profile embeddings (as used by score 'llm')."""
+        self.is_training = False
+        with t.no_grad():
+            user_embeds, item_embeds = self.forward(self.adj, 1.0)
+            out = {'cf_user': user_embeds, 'cf_item': item_embeds}
+            if self.profile_mode != 'none':
+                out['llm_user'] = t.stack([self.mlp(e) for e in self.usrprf_embeds]).mean(0)
+                out['llm_item'] = t.stack([self.mlp(e) for e in self.itmprf_embeds]).mean(0)
+        return {k: v.float().cpu().numpy() for k, v in out.items()}
 
     def full_predict(self, batch_data):
         user_embeds, item_embeds = self.forward(self.adj, 1.0)

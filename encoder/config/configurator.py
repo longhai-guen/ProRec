@@ -8,6 +8,14 @@ import torch.nn as nn
 
 PROFILE_MODES = ['real', 'none', 'shuffled', 'random']
 SCORE_MODES = ['model', 'cf', 'llm', 'all']
+SIDE_MODES = ['both', 'user', 'item']
+
+
+def profile_tag(model_configs):
+    """Run label used in file names and records: e.g. 'real', 'shuffled', 'real-user', 'real-item'."""
+    profile = model_configs.get('profile', 'real')
+    side = model_configs.get('profile_side', 'both')
+    return profile if side == 'both' else '{}-{}'.format(profile, side)
 
 
 def perturb_profile(embeds, mode, seed, side, idx=0):
@@ -41,6 +49,10 @@ def parse_configure(model=None, dataset=None):
                         help='LLM profile input: real | none (pure LightGCN) | shuffled | random')
     parser.add_argument('--score', type=str, default='model', choices=SCORE_MODES,
                         help='Final-test scorer: model (method default) | cf | llm | all')
+    parser.add_argument('--profile_side', type=str, default='both', choices=SIDE_MODES,
+                        help='Tier 2: side that keeps --profile; the other side gets random noise (content-free)')
+    parser.add_argument('--save_topk', type=int, default=0,
+                        help='Tier 2: save per-user top-K lists per scorer and the final embeddings; 0 = off')
     args, _ = parser.parse_known_args()
 
     # cuda
@@ -94,8 +106,15 @@ def parse_configure(model=None, dataset=None):
             scores = [args.score]
         if args.profile == 'none' and 'llm' in scores:
             raise Exception("--score llm needs profiles; it cannot be used with --profile none.")
+        if args.profile_side != 'both' and args.profile in ('none', 'random'):
+            raise Exception("--profile_side user/item needs --profile real or shuffled.")
         configs['model']['profile'] = args.profile
+        configs['model']['profile_side'] = args.profile_side
+        # perturbation per side: the side that is not kept gets random noise
+        configs['model']['profile_modes'] = {
+            side: args.profile if args.profile_side in ('both', side) else 'random' for side in ('user', 'item')}
         configs['test']['scores'] = scores
+        configs['test']['save_topk'] = args.save_topk
 
         if args.profile == 'none':
             return configs
@@ -105,9 +124,9 @@ def parse_configure(model=None, dataset=None):
         itmprf_embeds_path = "../data/{}/itm_emb_np.pkl".format(configs['data']['name'])
         seed = configs['train']['seed']
         with open(usrprf_embeds_path, 'rb') as f:
-            configs['usrprf_embeds'] = perturb_profile(pickle.load(f), args.profile, seed, 'user')
+            configs['usrprf_embeds'] = perturb_profile(pickle.load(f), configs['model']['profile_modes']['user'], seed, 'user')
         with open(itmprf_embeds_path, 'rb') as f:
-            configs['itmprf_embeds'] = perturb_profile(pickle.load(f), args.profile, seed, 'item')
+            configs['itmprf_embeds'] = perturb_profile(pickle.load(f), configs['model']['profile_modes']['item'], seed, 'item')
 
         return configs
 

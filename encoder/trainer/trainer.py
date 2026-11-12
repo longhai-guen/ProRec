@@ -10,7 +10,7 @@ import torch
 import torch.optim as optim
 from trainer.metrics import Metric
 from models.bulid_model import build_model
-from config.configurator import configs
+from config.configurator import configs, profile_tag
 from .utils import DisabledSummaryWriter, log_exceptions
 
 
@@ -146,10 +146,19 @@ class Trainer(object):
         model = build_model(self.data_handler).to(configs['device'])
         model.load_state_dict(best_state_dict)
         profile = configs['model'].get('profile', 'real')
+        side = configs['model'].get('profile_side', 'both')
+        save_topk = configs['test'].get('save_topk', 0)
+        run_name = '{}_{}_seed{}'.format(configs['model']['name'], profile_tag(configs['model']), configs['train']['seed'])
+        tier2_dir = './save/tier2/{}'.format(configs['data']['name'])
+        if save_topk:
+            os.makedirs(tier2_dir, exist_ok=True)
         for score in configs['test'].get('scores', ['model']):
             model.score_mode = score
             test_result = self.test(model)
-            tag = 'profile={} score={} seed={}'.format(profile, score, configs['train']['seed'])
+            tag = 'profile={} score={} seed={}'.format(profile_tag(configs['model']), score, configs['train']['seed'])
+            if save_topk:
+                users, topk = self.metric.topk_lists(model, self.data_handler.test_dataloader, save_topk)
+                np.savez_compressed('{}/{}_{}.npz'.format(tier2_dir, run_name, score), users=users, topk=topk)
 
             # save result
             self.logger.log("[{}] Best Epoch {}. Final test result: {}.".format(tag, best_epoch, test_result))
@@ -157,10 +166,15 @@ class Trainer(object):
             with open(test_file, 'a') as f:
                 f.write("[{}] Best Epoch {}. Final test result: {}. \n".format(tag, best_epoch, test_result))
             record = {'model': configs['model']['name'], 'dataset': configs['data']['name'], 'profile': profile,
-                      'score': score, 'seed': configs['train']['seed'], 'best_epoch': best_epoch,
+                      'side': side, 'score': score, 'seed': configs['train']['seed'], 'best_epoch': best_epoch,
                       'k': configs['test']['k'], **{m: test_result[m].tolist() for m in test_result}}
             with open('./save/result/ablation.jsonl', 'a') as f:
                 f.write(json.dumps(record) + '\n')
+        if save_topk and hasattr(model, 'export_embeds'):
+            embeds = model.export_embeds()
+            np.savez_compressed('{}/{}_emb.npz'.format(tier2_dir, run_name),
+                                **{k: v.astype(np.float16) for k, v in embeds.items()})
+            self.logger.log('Tier 2 top-{} lists and embeddings saved to {}/{}_*.npz'.format(save_topk, tier2_dir, run_name))
 
     @log_exceptions
     def evaluate(self, model, epoch_idx=None):
