@@ -30,3 +30,9 @@ wandb/
 # Python
 __pycache__/
 *.py[cod]
+
+# Datasets (profile embeddings are linked in from a shared folder) and experiment outputs
+/data
+/encoder/save/log
+/encoder/save/result
+/encoder/save/tier2
