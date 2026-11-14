@@ -7,15 +7,35 @@ import numpy as np
 import torch.nn as nn
 
 PROFILE_MODES = ['real', 'none', 'shuffled', 'random']
-SCORE_MODES = ['model', 'cf', 'llm', 'all']
+SCORE_MODES = ['model', 'cf', 'llm', 'orig', 'all']
 SIDE_MODES = ['both', 'user', 'item']
+
+# Tier 3 component ablations: name -> (model, overrides). Keys found in the dataset block of the yml
+# (e.g. inv_weight) are overridden there, every other key is set on configs['model'].
+VARIANTS = {
+    'full': (None, {}),
+    # ProEx
+    'p1': ('lightgcn_proex', {'profiles': 1}),                  # original profile only, no CoT extrapolations
+    'noinv': ('lightgcn_proex', {'inv_weight': 0}),             # no variance (invariance) loss across environments
+    'noex': ('lightgcn_proex', {'ex_weight': 0}),               # no uniformity loss on projected profiles
+    # ProMax
+    'nosdr': ('lightgcn_promax', {'sdr_weight': 0}),            # S2DR only
+    'nos2dr': ('lightgcn_promax', {'s2dr_weight': 0}),          # SDR only
+    'noentropy': ('lightgcn_promax', {'entropy_weight': False}),  # SDR confidence weight w = 1
+    'nowhiten': ('lightgcn_promax', {'whiten': 'raw'}),         # SDR targets from raw (centered) profiles
+    'graph-train': ('lightgcn_promax', {'rag_graph': 'train'}),        # S2DR second view = training graph
+    'graph-shuffled': ('lightgcn_promax', {'rag_graph': 'shuffled'}),  # LLM-added edges moved to other users
+    'graph-random': ('lightgcn_promax', {'rag_graph': 'random'}),      # same number of uniformly random edges
+}
 
 
 def profile_tag(model_configs):
-    """Run label used in file names and records: e.g. 'real', 'shuffled', 'real-user', 'real-item'."""
+    """Run label used in file names and records: e.g. 'real', 'real-user', 'random@graph-random'."""
     profile = model_configs.get('profile', 'real')
     side = model_configs.get('profile_side', 'both')
-    return profile if side == 'both' else '{}-{}'.format(profile, side)
+    tag = profile if side == 'both' else '{}-{}'.format(profile, side)
+    variant = model_configs.get('variant', 'full')
+    return tag if variant == 'full' else '{}@{}'.format(tag, variant)
 
 
 def perturb_profile(embeds, mode, seed, side, idx=0):
@@ -51,6 +71,8 @@ def parse_configure(model=None, dataset=None):
                         help='Final-test scorer: model (method default) | cf | llm | all')
     parser.add_argument('--profile_side', type=str, default='both', choices=SIDE_MODES,
                         help='Tier 2: side that keeps --profile; the other side gets random noise (content-free)')
+    parser.add_argument('--variant', type=str, default='full', choices=list(VARIANTS),
+                        help='Tier 3: component ablation (see VARIANTS in config/configurator.py)')
     parser.add_argument('--save_topk', type=int, default=0,
                         help='Tier 2: save per-user top-K lists per scorer and the final embeddings; 0 = off')
     args, _ = parser.parse_known_args()
@@ -102,9 +124,13 @@ def parse_configure(model=None, dataset=None):
             raise Exception("--score {} is only supported for LightGCN-based models.".format(args.score))
         if args.score == 'all':
             scores = ['model', 'cf', 'llm'] if args.profile != 'none' else ['model']
+            if model_name == 'lightgcn_proex' and args.profile != 'none':
+                scores.append('orig')   # fused score with the original profile only (no test-time mean pooling)
         else:
             scores = [args.score]
-        if args.profile == 'none' and 'llm' in scores:
+        if 'orig' in scores and model_name != 'lightgcn_proex':
+            raise Exception("--score orig is only defined for lightgcn_proex.")
+        if args.profile == 'none' and ('llm' in scores or 'orig' in scores):
             raise Exception("--score llm needs profiles; it cannot be used with --profile none.")
         if args.profile_side != 'both' and args.profile in ('none', 'random'):
             raise Exception("--profile_side user/item needs --profile real or shuffled.")
@@ -115,6 +141,20 @@ def parse_configure(model=None, dataset=None):
             side: args.profile if args.profile_side in ('both', side) else 'random' for side in ('user', 'item')}
         configs['test']['scores'] = scores
         configs['test']['save_topk'] = args.save_topk
+
+        # Tier 3 component ablation
+        variant_model, overrides = VARIANTS[args.variant]
+        if variant_model is not None and variant_model != model_name:
+            raise Exception("--variant {} is defined for {}, not {}.".format(args.variant, variant_model, model_name))
+        if args.variant != 'full' and args.profile == 'none':
+            raise Exception("--variant needs profiles; it cannot be used with --profile none.")
+        configs['model']['variant'] = args.variant
+        data_block = configs['model'].get(configs['data']['name'], {})
+        for key, value in overrides.items():
+            if key in data_block:
+                data_block[key] = value
+            else:
+                configs['model'][key] = value
 
         if args.profile == 'none':
             return configs

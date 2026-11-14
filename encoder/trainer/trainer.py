@@ -166,7 +166,7 @@ class Trainer(object):
             with open(test_file, 'a') as f:
                 f.write("[{}] Best Epoch {}. Final test result: {}. \n".format(tag, best_epoch, test_result))
             record = {'model': configs['model']['name'], 'dataset': configs['data']['name'], 'profile': profile,
-                      'side': side, 'score': score, 'seed': configs['train']['seed'], 'best_epoch': best_epoch,
+                      'side': side, 'variant': configs['model'].get('variant', 'full'), 'score': score, 'seed': configs['train']['seed'], 'best_epoch': best_epoch,
                       'k': configs['test']['k'], **{m: test_result[m].tolist() for m in test_result}}
             with open('./save/result/ablation.jsonl', 'a') as f:
                 f.write(json.dumps(record) + '\n')

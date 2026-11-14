@@ -205,7 +205,9 @@ class LightGCN_proex(BaseModel):
         usr_prf_list = []
         itm_prf_list = []
 
-        for env in range(self.num_profiles):
+        # 'orig': fused score with the original profile only, instead of mean pooling over all profiles
+        test_profiles = 1 if self.score_mode == 'orig' else self.num_profiles
+        for env in range(test_profiles):
             all_usrprf_embeds = self.mlp(self.usrprf_embeds[env])
             all_itmprf_embeds = self.mlp(self.itmprf_embeds[env])
 

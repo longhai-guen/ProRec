@@ -40,15 +40,60 @@ class LightGCN_promax(BaseModel):
         if self.profile_mode == 'none':
             return
 
+        # Tier 3 switches (defaults reproduce the original method)
+        self.whiten = configs['model'].get('whiten', 'pca_white')          # pca_white | raw
+        self.entropy_weight = configs['model'].get('entropy_weight', True)
+        self.rag_graph = configs['model'].get('rag_graph', 'llm')          # llm | train | shuffled | random
+
         self.usrprf_embeds = t.tensor(self.pca(configs['usrprf_embeds'])).float().to(configs['device'])
         self.itmprf_embeds = t.tensor(self.pca(configs['itmprf_embeds'])).float().to(configs['device'])  # [item_num, 1536]
 
         with open("../data/{}/new_trn_rag_mat.pkl".format(configs['data']['name']), 'rb') as fs:
             mat = (pickle.load(fs) != 0).astype(np.float32)
-        if type(mat) != coo_matrix:
-            mat = coo_matrix(mat)
+        mat = self.control_graph(coo_matrix(mat), data_handler.trn_mat, configs['train']['seed'])
 
         self.new_adj = data_handler._make_torch_adj(mat)
+
+    def control_graph(self, rag_mat, trn_mat, seed):
+        """Second view for S2DR. The LLM graph is the training graph plus LLM-added edges; the controls keep the
+        training edges and replace the added ones.
+          llm:      unchanged
+          train:    no added edges (both views use the training graph)
+          shuffled: each user's added item set is given to another user (item marginals kept, user match broken)
+          random:   each user keeps the same number of added edges, to uniformly random non-training items
+        """
+        if self.rag_graph == 'llm':
+            return rag_mat
+        trn = (trn_mat.tocsr() != 0).astype(np.float32)
+        added = ((rag_mat.tocsr() != 0).astype(np.float32) - trn).maximum(0)
+        added.eliminate_zeros()
+        rs = np.random.RandomState(seed * 10 + 7)
+        if self.rag_graph == 'train':
+            new = trn
+        elif self.rag_graph == 'shuffled':
+            new = added[rs.permutation(added.shape[0])]
+            new = (trn + new).minimum(1)
+        elif self.rag_graph == 'random':
+            counts = np.diff(added.indptr)
+            rows, cols = [], []
+            for u in np.nonzero(counts)[0]:
+                seen = set(trn.indices[trn.indptr[u]:trn.indptr[u + 1]])
+                picked = []
+                while len(picked) < counts[u]:
+                    for i in rs.randint(0, trn.shape[1], size=2 * counts[u]):
+                        if i not in seen and len(picked) < counts[u]:
+                            seen.add(i)
+                            picked.append(i)
+                rows += [u] * len(picked)
+                cols += picked
+            new = csr_matrix((np.ones(len(rows), dtype=np.float32), (rows, cols)), shape=trn.shape)
+            new = (trn + new).minimum(1)
+        else:
+            raise ValueError('unknown rag_graph: {}'.format(self.rag_graph))
+        new = coo_matrix(new)
+        print('S2DR graph [{}]: {} edges (training graph {}, LLM graph {})'.format(
+            self.rag_graph, new.nnz, trn.nnz, rag_mat.nnz))
+        return new
 
     def _propagate(self, adj, embeds):
         return t.spmm(adj, embeds)
@@ -97,6 +142,9 @@ class LightGCN_promax(BaseModel):
 
     def pca(self, embedding):
         mean = np.mean(embedding, axis=0)
+        if self.whiten == 'raw':
+            # no projection or whitening: SDR and the llm scorer use cosine on the centered raw profiles
+            return embedding - mean
 
         cov = np.cov(embedding - mean, rowvar=False)
 
@@ -147,6 +195,8 @@ class LightGCN_promax(BaseModel):
             H_norm = H / math.log(text_sims.shape[-1] + 1e-12)
 
             w = (1.0 - H_norm).clamp(min=0.1, max=1.0)
+            if not self.entropy_weight:
+                w = t.ones_like(w)
 
         usr_norm = torch.nn.functional.normalize(user_embeds, dim=1)  # [M * d]
         itm_norm = torch.nn.functional.normalize(item_embeds, dim=1)  # [N * d]

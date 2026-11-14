@@ -11,7 +11,7 @@ from collections import defaultdict
 import numpy as np
 
 PROFILE_ORDER = ['none', 'real', 'real-user', 'real-item', 'shuffled', 'shuffled-user', 'shuffled-item', 'random']
-SCORE_ORDER = ['model', 'cf', 'llm']
+SCORE_ORDER = ['model', 'cf', 'llm', 'orig']
 
 
 def main():
@@ -31,6 +31,8 @@ def main():
             model = 'lightgcn' if r['profile'] == 'none' else r['model']
             side = r.get('side', 'both')
             profile = r['profile'] if side == 'both' else '{}-{}'.format(r['profile'], side)
+            if r.get('variant', 'full') != 'full':
+                profile += '@' + r['variant']
             latest[(r['dataset'], model, profile, r['score'], r['seed'])] = r
 
     groups = defaultdict(lambda: defaultdict(list))
@@ -44,7 +46,9 @@ def main():
 
     def order(key):
         dataset, model, profile, score = key
-        return (dataset, model != 'lightgcn', model, PROFILE_ORDER.index(profile), SCORE_ORDER.index(score))
+        base, _, variant = profile.partition('@')
+        rank = PROFILE_ORDER.index(base) if base in PROFILE_ORDER else len(PROFILE_ORDER)
+        return (dataset, model != 'lightgcn', model, variant, rank, base, SCORE_ORDER.index(score))
 
     cols = ['{}@{}'.format(m, k) for k in args.k for m in args.metric]
     header = ['dataset', 'model', 'profile', 'score', 'n'] + cols

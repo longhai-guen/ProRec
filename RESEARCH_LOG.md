@@ -1,6 +1,6 @@
 # Research log: LLM profiles vs collaborative filtering (ProRec)
 
-Last updated: 2026-11-12
+Last updated: 2026-11-14
 
 **Research question.** Does the LLM latent space (LLM-generated user/item profiles) complement collaborative filtering (CF), or do LLM-enhanced recommenders gain for other reasons?
 
@@ -26,6 +26,9 @@ Last updated: 2026-11-12
 | Tier 2: `lightgcn_proex.py`, `lightgcn_promax.py` | `export_embeds()`; ProEx perturbs each side separately |
 | `run_tier2.sh` (new) | GPU runner: none + {real, shuffled, random, real-user, real-item} × {ProEx, ProMax} × seeds, all with `--save_topk 50 --score all` |
 | `analyze_tier2.py` (new) | Report per dataset → `save/result/tier2_<dataset>.md`: A overall, B user-activity quintiles, C head/tail items, D complementarity/serendipity metrics, E CKA + kNN overlap |
+| Tier 3 (2026-11-14): `configurator.py` | `--variant` (component ablations, table `VARIANTS`); score `orig` for ProEx (fused with the original profile only, no test-time mean pooling), included in `--score all` |
+| Tier 3: `lightgcn_promax.py` | `rag_graph {llm,train,shuffled,random}` (S2DR second view: LLM-added edges kept / removed / moved to other users / same count random), `entropy_weight`, `whiten {pca_white,raw}` |
+| `run_tier3.sh`, `summarize_tier3.py` (new) | Each variant × {real, random} × 3 seeds; report → `save/result/tier3_summary.md` (content-free gain, semantic gain, change vs full) |
 
 Line endings: `lightgcn_proex.py`, `lightgcn_promax.py`, `lightgcn_proex.yml` are CRLF; keep them that way.
 
