@@ -1,6 +1,6 @@
 # Research log: LLM profiles vs collaborative filtering (ProRec)
 
-Last updated: 2026-11-14
+Last updated: 2026-11-19
 
 **Research question.** Does the LLM latent space (LLM-generated user/item profiles) complement collaborative filtering (CF), or do LLM-enhanced recommenders gain for other reasons?
 
@@ -29,6 +29,7 @@ Last updated: 2026-11-14
 | Tier 3 (2026-11-14): `configurator.py` | `--variant` (component ablations, table `VARIANTS`); score `orig` for ProEx (fused with the original profile only, no test-time mean pooling), included in `--score all` |
 | Tier 3: `lightgcn_promax.py` | `rag_graph {llm,train,shuffled,random}` (S2DR second view: LLM-added edges kept / removed / moved to other users / same count random), `entropy_weight`, `whiten {pca_white,raw}` |
 | `run_tier3.sh`, `summarize_tier3.py` (new) | Each variant × {real, random} × 3 seeds; report → `save/result/tier3_summary.md` (content-free gain, semantic gain, change vs full) |
+| Baseline (2026-11-19): `configurator.py`, `summarize_tier3.py` | Variant `s2dr-only` = pure-CF LightGCN+S2DR (`rag_graph=train`, `sdr_weight=0`, ProMax hyperparameters). No SDR, so profiles have no effect (smoke test: real == random to the last digit); run once per seed with `real`, 5 seeds. With `keep_rate` 1 both S2DR views are the same graph, so S2DR reduces to a uniformity loss. The summary reuses the real run as random for it, so "real vs full" = ProMax(full) gap |
 
 Line endings: `lightgcn_proex.py`, `lightgcn_promax.py`, `lightgcn_proex.yml` are CRLF; keep them that way.
 
@@ -143,6 +144,7 @@ Seed std of Recall@20: 0.0002–0.0015. The `llm`-only score with perturbed prof
 
 ## 5. Next steps (in order)
 
+0. (2026-11-19) Run the LightGCN+S2DR baseline (`s2dr-only`, 3 datasets × 5 seeds). If it matches ProMax, ProMax's gain needs no LLM signal.
 1. Rerun `real` for ProEx and ProMax with 5 seeds and `--score all` (30 runs, code ready) → complementarity test and paired tests.
 2. Save per-user metrics and top-K lists per scorer → serendipity-style complementarity metrics and user-activity / item-popularity strata (RQ1).
 3. Controlled sparsity option in the data loader.

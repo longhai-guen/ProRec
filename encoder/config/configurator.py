@@ -26,6 +26,9 @@ VARIANTS = {
     'graph-train': ('lightgcn_promax', {'rag_graph': 'train'}),        # S2DR second view = training graph
     'graph-shuffled': ('lightgcn_promax', {'rag_graph': 'shuffled'}),  # LLM-added edges moved to other users
     'graph-random': ('lightgcn_promax', {'rag_graph': 'random'}),      # same number of uniformly random edges
+    # Pure-CF baseline LightGCN+S2DR: S2DR on the training graph, no SDR, so profiles have no effect (real == random).
+    # With keep_rate 1 both S2DR views are the same graph, so S2DR acts as a uniformity loss on the CF embeddings.
+    's2dr-only': ('lightgcn_promax', {'rag_graph': 'train', 'sdr_weight': 0}),
 }
 
 

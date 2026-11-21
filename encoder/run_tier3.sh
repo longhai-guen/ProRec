@@ -7,6 +7,9 @@
 #   ProMax: nosdr (S2DR only), nos2dr (SDR only), noentropy (w = 1), nowhiten (raw profiles for SDR),
 #           graph-train / graph-shuffled / graph-random (LLM-added edges removed / moved to other users / random).
 #           ProMax random@graph-shuffled is the fully content-free ProMax (no LLM signal in profiles or graph).
+#           s2dr-only is the pure-CF baseline LightGCN+S2DR (training graph, no SDR); profiles have no effect, so run
+#           it with PROFILES=real only, e.g. MODELS=lightgcn_promax PROMAX_VARIANTS=s2dr-only PROFILES=real SEEDS="2021 ... 2025"
+#           (an empty PROEX_VARIANTS= would fall back to the defaults, so restrict MODELS instead).
 #
 # Run from encoder/ in the conda env with CUDA torch. Lists can be overridden through the environment, e.g.
 #   CUDA=4 DATASETS=amazon nohup bash run_tier3.sh > tier3_amazon.out 2>&1 &

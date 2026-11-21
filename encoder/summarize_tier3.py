@@ -18,7 +18,10 @@ import numpy as np
 
 MODEL_LABEL = {'lightgcn_proex': 'ProEx', 'lightgcn_promax': 'ProMax'}
 VARIANT_ORDER = ['full', 'p1', 'noinv', 'noex', 'nosdr', 'nos2dr', 'noentropy', 'nowhiten',
-                 'graph-train', 'graph-shuffled', 'graph-random']
+                 'graph-train', 'graph-shuffled', 'graph-random', 's2dr-only']
+# Variants where profiles have no effect by construction (no SDR), so they run once with real profiles and that run
+# also stands in for random.
+PROFILE_FREE = {'s2dr-only'}
 
 
 def ms(vals, signed=True):
@@ -73,6 +76,8 @@ def main():
             rows = []
             for v in variants:
                 real, rand = get(ds, model, 'real', v, 'model'), get(ds, model, 'random', v, 'model')
+                if v in PROFILE_FREE and not rand:
+                    rand = real
                 row = [v, ms(list(real.values()), False), ms(list(rand.values()), False), ms(diff(rand, none)), ms(diff(real, rand)),
                        '-' if v == 'full' else ms(diff(real, full_real))]
                 if model == 'lightgcn_proex':
