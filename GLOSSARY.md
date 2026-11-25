@@ -32,11 +32,11 @@ _Avoid_: LLM gain, content gain
 
 ## ProMax components
 
-**SDR**:
+**SDR** (supervised distribution reshaping):
 ProMax's distillation term that pulls CF user–item similarities toward profile similarities; the only path by which
 profile content reaches ProMax.
 
-**S2DR**:
+**S2DR** (self-supervised distribution reshaping; S²DR in the paper):
 ProMax's contrastive term between CF embeddings on the training graph and on a second graph.
 
 **LLM graph**:
@@ -47,3 +47,28 @@ _Avoid_: RAG graph, augmented graph
 The pure-CF baseline: LightGCN with S2DR on the training graph, no SDR and no profiles. ProMax minus this baseline is
 everything ProMax gains from LLM signals.
 _Avoid_: s2dr-only (that is only the run's variant name), ProMax without LLM
+
+## Diagnostics (Tier 4)
+
+**Content-only scorer**:
+A scorer that ranks items from the profiles alone, with no CF embeddings: user–item profile cosine, item-to-item
+profile kNN over the user's history, or a two-tower model trained on frozen profiles.
+_Avoid_: LLM retriever, profile model
+
+**Activity gate**:
+A fusion of CF and a content-only scorer whose mixing weight depends only on the user's activity quintile, chosen on
+validation data.
+_Avoid_: adaptive fusion, smart gate
+
+**Oracle gate**:
+The same fusion with the best mixing weight picked per user on the test data; a ceiling, never a result.
+
+**Sparsified user**:
+A test user whose training history was cut to a fraction f of its interactions for the controlled-sparsity study.
+
+**Profile leakage**:
+A profile still encoding interactions that were removed from training, because the LLM wrote it from the full history.
+
+**Leak-free user profile**:
+A sparsified user's stand-in profile, built only from the profiles of the items the user kept.
+_Avoid_: rebuilt profile, synthetic profile

@@ -15,7 +15,7 @@ ProRec is the authors' library of LLM-profile recommenders: DMRec (SIGIR'25), Pr
 on the RLMRec training framework. This fork is used for research on how LLM latent spaces (profile embeddings) work with
 CF recommenders. It asks whether the LLM profiles really improve CF, or whether the reported gains come from other
 parts of the methods. The work so far is ablations of ProEx and ProMax on LightGCN. Their status, design and findings are
-in `RESEARCH_LOG.md`, which is the running record. Read it before planning new experiments, and update it when code or
+in `RESEARCH_LOG.md`, which is the running record; the consolidated results are in `FINDINGS.md`. Read it before planning new experiments, and update it when code or
 results change.
 
 ## Running
