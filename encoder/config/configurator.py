@@ -10,6 +10,12 @@ PROFILE_MODES = ['real', 'none', 'shuffled', 'random']
 SCORE_MODES = ['model', 'cf', 'llm', 'orig', 'all']
 SIDE_MODES = ['both', 'user', 'item']
 
+# Tier 4 (diagnostic 1): ProMax SDR knobs settable from the command line. flag -> (config key, label prefix).
+# A run that sets any of them gets a variant label like 'graph-train+tau0.05+sw0.5+raw+w1', so its records never
+# merge with the plain Tier 3 variant of the same name.
+SDR_FLAGS = {'sdr_tau': ('sdr_tau', 'tau'), 'sdr_weight': ('sdr_weight', 'sw'),
+             'sdr_w': ('entropy_weight', ''), 'whiten': ('whiten', '')}
+
 # Tier 3 component ablations: name -> (model, overrides). Keys found in the dataset block of the yml
 # (e.g. inv_weight) are overridden there, every other key is set on configs['model'].
 VARIANTS = {
@@ -78,6 +84,16 @@ def parse_configure(model=None, dataset=None):
                         help='Tier 3: component ablation (see VARIANTS in config/configurator.py)')
     parser.add_argument('--save_topk', type=int, default=0,
                         help='Tier 2: save per-user top-K lists per scorer and the final embeddings; 0 = off')
+    parser.add_argument('--sdr_tau', type=float, default=None,
+                        help='Tier 4, ProMax: temperature of the SDR target softmax (default 0.2)')
+    parser.add_argument('--sdr_weight', type=float, default=None,
+                        help='Tier 4, ProMax: SDR loss weight (default: the dataset value in the yml)')
+    parser.add_argument('--sdr_w', type=str, default=None, choices=['entropy', 'one'],
+                        help='Tier 4, ProMax: SDR per-user weight, entropy-based with 0.1 floor (default) or w = 1')
+    parser.add_argument('--whiten', type=str, default=None, choices=['pca_white', 'raw'],
+                        help='Tier 4, ProMax: SDR target from PCA-whitened (default) or raw centered profiles')
+    parser.add_argument('--log_sdr', action='store_true',
+                        help='Tier 4, ProMax: write the per-epoch SDR weight statistics and losses to the log file')
     args, _ = parser.parse_known_args()
 
     # cuda
@@ -151,13 +167,34 @@ def parse_configure(model=None, dataset=None):
             raise Exception("--variant {} is defined for {}, not {}.".format(args.variant, variant_model, model_name))
         if args.variant != 'full' and args.profile == 'none':
             raise Exception("--variant needs profiles; it cannot be used with --profile none.")
-        configs['model']['variant'] = args.variant
         data_block = configs['model'].get(configs['data']['name'], {})
         for key, value in overrides.items():
             if key in data_block:
                 data_block[key] = value
             else:
                 configs['model'][key] = value
+
+        # Tier 4 SDR knobs, applied after the variant so they win
+        hp = {flag: getattr(args, flag) for flag in SDR_FLAGS if getattr(args, flag) is not None}
+        if (hp or args.log_sdr) and model_name != 'lightgcn_promax':
+            raise Exception("--sdr_tau/--sdr_weight/--sdr_w/--whiten/--log_sdr are only defined for lightgcn_promax.")
+        if hp and args.profile == 'none':
+            raise Exception("SDR knobs need profiles; they cannot be used with --profile none.")
+        label = args.variant
+        for flag, value in hp.items():
+            key, prefix = SDR_FLAGS[flag]
+            if flag == 'sdr_w':
+                value = value == 'entropy'
+                label += '+w1' if not value else '+went'
+            else:
+                label += '+{}{:g}'.format(prefix, value) if prefix else '+' + value
+            if key in data_block:
+                data_block[key] = value
+            else:
+                configs['model'][key] = value
+        configs['model']['variant'] = label
+        configs['model']['hp'] = hp
+        configs['train']['log_sdr'] = args.log_sdr
 
         if args.profile == 'none':
             return configs

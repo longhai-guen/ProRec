@@ -43,6 +43,7 @@ class LightGCN_promax(BaseModel):
         # Tier 3 switches (defaults reproduce the original method)
         self.whiten = configs['model'].get('whiten', 'pca_white')          # pca_white | raw
         self.entropy_weight = configs['model'].get('entropy_weight', True)
+        self.sdr_tau = configs['model'].get('sdr_tau', 0.2)                # Tier 4: temperature of the SDR target
         self.rag_graph = configs['model'].get('rag_graph', 'llm')          # llm | train | shuffled | random
 
         self.usrprf_embeds = t.tensor(self.pca(configs['usrprf_embeds'])).float().to(configs['device'])
@@ -188,13 +189,17 @@ class LightGCN_promax(BaseModel):
             l2_usrprf_emb = torch.nn.functional.normalize(self.usrprf_embeds[uni_ancs], dim=1)  # [B * t]
             l2_itmprf_emb = torch.nn.functional.normalize(self.itmprf_embeds, dim=1)   # [N * t]
 
-            similarity = l2_usrprf_emb @ l2_itmprf_emb.T / 0.2
+            similarity = l2_usrprf_emb @ l2_itmprf_emb.T / self.sdr_tau
             text_sims = torch.softmax(similarity, dim=1).detach()
 
             H = -(text_sims * (text_sims.clamp_min(1e-12).log())).sum(dim=-1)
             H_norm = H / math.log(text_sims.shape[-1] + 1e-12)
 
             w = (1.0 - H_norm).clamp(min=0.1, max=1.0)
+            # Tier 4 diagnostics (before the w = 1 switch): is the entropy weight stuck at its 0.1 floor?
+            w_q = t.quantile(w, t.tensor([0.25, 0.5, 0.75], device=w.device))
+            w_stats = {'w_mean': w.mean(), 'w_q25': w_q[0], 'w_q50': w_q[1], 'w_q75': w_q[2],
+                       'w_floor': (w <= 0.1 + 1e-6).float().mean(), 'h_norm': H_norm.mean()}
             if not self.entropy_weight:
                 w = t.ones_like(w)
 
@@ -214,7 +219,7 @@ class LightGCN_promax(BaseModel):
         loss = bpr_loss + reg_loss + sdr_loss + s2dr_loss
 
         losses = {'bpr_loss': bpr_loss, 'reg_loss': reg_loss, 'sdr_loss': sdr_loss,
-                  's2dr_loss:': s2dr_loss}
+                  's2dr_loss:': s2dr_loss, **w_stats}
         return loss, losses
 
     def export_embeds(self):

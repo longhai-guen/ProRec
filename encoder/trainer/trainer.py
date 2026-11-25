@@ -100,6 +100,9 @@ class Trainer(object):
 
         if 'log_loss' in configs['train'] and configs['train']['log_loss']:
             self.logger.log(loss_log_dict, save_to_log=False, print_to_console=True)
+        if configs['train'].get('log_sdr'):
+            # Tier 4: per-epoch means of the losses and of the SDR weight statistics
+            self.logger.log_loss(epoch_idx, loss_log_dict, save_to_log=True, print_to_console=False)
 
     @log_exceptions
     def train(self, model):
@@ -128,6 +131,7 @@ class Trainer(object):
                     now_patience = 0
                     best_epoch = epoch_idx
                     best_recall = eval_result['recall'][-1]
+                    best_val = {m: eval_result[m].tolist() for m in eval_result}
                     best_state_dict = deepcopy(model.state_dict())
                 else:
                     now_patience += 1
@@ -167,7 +171,10 @@ class Trainer(object):
                 f.write("[{}] Best Epoch {}. Final test result: {}. \n".format(tag, best_epoch, test_result))
             record = {'model': configs['model']['name'], 'dataset': configs['data']['name'], 'profile': profile,
                       'side': side, 'variant': configs['model'].get('variant', 'full'), 'score': score, 'seed': configs['train']['seed'], 'best_epoch': best_epoch,
-                      'k': configs['test']['k'], **{m: test_result[m].tolist() for m in test_result}}
+                      'k': configs['test']['k'], **{m: test_result[m].tolist() for m in test_result},
+                      **{'val_' + m: v for m, v in best_val.items()}}
+            if configs['model'].get('hp'):
+                record['hp'] = configs['model']['hp']
             with open('./save/result/ablation.jsonl', 'a') as f:
                 f.write(json.dumps(record) + '\n')
         if save_topk and hasattr(model, 'export_embeds'):

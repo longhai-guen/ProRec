@@ -1,10 +1,12 @@
 # Research log: LLM profiles vs collaborative filtering (ProRec)
 
-Last updated: 2026-11-19
+Last updated: 2026-11-26
 
 **Research question.** Does the LLM latent space (LLM-generated user/item profiles) complement collaborative filtering (CF), or do LLM-enhanced recommenders gain for other reasons?
 
-**Current answer (preliminary).** For ProEx and ProMax on LightGCN, 71–96% of the Recall@20 gain over LightGCN remains when the profiles are shuffled or replaced by noise. The part that needs real profile content is at most +0.0038 Recall@20 (+2.6%). Most of the improvement comes from the extra training objectives (a regularization effect), not from the LLM's knowledge.
+**Current answer.** See [FINDINGS.md](FINDINGS.md) for the full write-up of Tiers 1–3 and the LightGCN+S2DR baseline (2026-11-24). In short: most of the gain of ProEx and ProMax is content-free; a pure-CF LightGCN+S2DR baseline recovers 84–104% of ProMax's gain and beats ProEx on all three datasets; the semantic gain is at most about +0.004 Recall@20 and significant on only 2 of 6 method × dataset pairs.
+
+**Next (2026-11-25).** Tier 4 diagnostics are planned in [docs/tier4-plan.md](docs/tier4-plan.md), with the go/no-go rule for designing an LLM method in [ADR 0001](docs/adr/0001-diagnostics-before-llm-method.md). Diagnostic 1 code is written and smoke-tested on CPU (2026-11-26); nothing has run on the server yet. Smoke-test notes: with every new flag at its default, `graph-train` and `s2dr-only` reproduce the Tier 3 code's test numbers exactly. With fake 64-d profiles, w already sits at the 0.1 floor for 100% of users at τ = 0.2 (whitened), and τ = 0.02 lifts it to about 0.8. The floor may therefore come from the target temperature itself, whatever the profiles contain.
 
 ---
 
@@ -30,6 +32,10 @@ Last updated: 2026-11-19
 | Tier 3: `lightgcn_promax.py` | `rag_graph {llm,train,shuffled,random}` (S2DR second view: LLM-added edges kept / removed / moved to other users / same count random), `entropy_weight`, `whiten {pca_white,raw}` |
 | `run_tier3.sh`, `summarize_tier3.py` (new) | Each variant × {real, random} × 3 seeds; report → `save/result/tier3_summary.md` (content-free gain, semantic gain, change vs full) |
 | Baseline (2026-11-19): `configurator.py`, `summarize_tier3.py` | Variant `s2dr-only` = pure-CF LightGCN+S2DR (`rag_graph=train`, `sdr_weight=0`, ProMax hyperparameters). No SDR, so profiles have no effect (smoke test: real == random to the last digit); run once per seed with `real`, 5 seeds. With `keep_rate` 1 both S2DR views are the same graph, so S2DR reduces to a uniformity loss. The summary reuses the real run as random for it, so "real vs full" = ProMax(full) gap |
+| Tier 4 diag 1 (2026-11-26): `lightgcn_promax.py` | `sdr_tau` config key (SDR target temperature, default 0.2); per-batch SDR weight statistics `w_mean`, `w_q25/50/75`, `w_floor` (share of users at the 0.1 floor) and `h_norm` returned in the losses dict |
+| Tier 4: `configurator.py` | Flags `--sdr_tau`, `--sdr_weight`, `--sdr_w {entropy,one}`, `--whiten {pca_white,raw}` (ProMax only, applied after `--variant`). A run that sets any of them gets a variant label such as `graph-train+tau0.05+sw0.5+w1+raw` and an `hp` field in its record, so it never merges with the plain Tier 3 variant. `--log_sdr` writes per-epoch loss and w statistics to the log file |
+| Tier 4: `trainer.py` | Every record now carries the validation metrics at the best epoch (`val_recall`, `val_ndcg`), used to select settings |
+| `run_tier4.sh`, `summarize_tier4.py` (new) | Stages `STAGE=1a/1b/1c/1d` of diagnostic 1 (see [docs/tier4-plan.md](docs/tier4-plan.md)). The summary selects by validation Recall@20 at seed 2025 and writes `save/result/tier4_best.json`, which the next stage reads; report → `save/result/tier4_summary.md` |
 
 Line endings: `lightgcn_proex.py`, `lightgcn_promax.py`, `lightgcn_proex.yml` are CRLF; keep them that way.
 
@@ -144,7 +150,11 @@ Seed std of Recall@20: 0.0002–0.0015. The `llm`-only score with perturbed prof
 
 ## 5. Next steps (in order)
 
-0. (2026-11-19) Run the LightGCN+S2DR baseline (`s2dr-only`, 3 datasets × 5 seeds). If it matches ProMax, ProMax's gain needs no LLM signal.
+0. Done 2026-11-24: ran the LightGCN+S2DR baseline (`s2dr-only`, 3 datasets × 5 seeds). If it matches ProMax, ProMax's gain needs no LLM signal.
+   Result (Recall@20 / NDCG@20, paired over 5 seeds, t-test p<0.05 marked *):
+   - LightGCN+S2DR beats LightGCN on every dataset (amazon +0.0122*, yelp +0.0167*, steam +0.0056*); it covers 84–104% of ProMax's Recall@20 gain.
+   - ProMax − LightGCN+S2DR: amazon R +0.0012 (n.s.) / N +0.0018*; yelp −0.0006 / −0.0001 (n.s.); steam +0.0011* / +0.0009*. All the LLM signal (profiles + LLM graph) adds is at most about 0.001–0.002.
+   - LightGCN+S2DR beats ProEx on all three datasets (R@20 −0.0055*, −0.0032*, −0.0025* for ProEx − baseline).
 1. Rerun `real` for ProEx and ProMax with 5 seeds and `--score all` (30 runs, code ready) → complementarity test and paired tests.
 2. Save per-user metrics and top-K lists per scorer → serendipity-style complementarity metrics and user-activity / item-popularity strata (RQ1).
 3. Controlled sparsity option in the data loader.
